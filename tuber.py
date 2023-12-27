@@ -4,12 +4,12 @@ import os
 import re
 import sys
 import json
+from datetime import datetime
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from googleapiclient.discovery import build
 from ruamel.yaml import YAML
 
 TUBER_API_KEY = os.getenv('TUBER_API_KEY')
-
 RESOLUTIONS = {
     'nHD': (640, 360),
     'FWVGA': (854, 480),
@@ -36,6 +36,7 @@ def load_config(config_path):
 
 def sanitize_tags(tags):
     '''Sanitize tags for Obsidian: lowercase with hyphens instead of spaces or other characters.'''
+    print(f'sanitize_tags: {tags}')
     def sanitize_tag(tag):
         tag = tag.replace("'", '')          # Remove apostrophes
         tag = re.sub(r"[^\w\s]", '-', tag)  # Replace non-alphanumeric characters with hyphens
@@ -48,22 +49,42 @@ def sanitize_tags(tags):
     ]
 
 def sanitize_filename(title):
-    '''Sanitize the title to be used as a valid filename.'''
+    ''' Sanitize the title to be used as a valid filename. '''
     invalid_chars = '<>:"/\\|?*'
     for char in invalid_chars:
         title = title.replace(char, '-')
     return title
 
+def format_frontmatter(frontmatter_config, metadata):
+    ''' Formats the frontmatter for the markdown file using the provided configuration and metadata. '''
+    frontmatter = frontmatter_config.copy()
+    frontmatter['date'] = datetime.now().strftime('%Y-%m-%d')
+    frontmatter['day'] = datetime.now().strftime('%a')
+    frontmatter['time'] = datetime.now().strftime('%H:%M')
+    frontmatter['tags'] = sanitize_tags(metadata.get('tags', []))
+    frontmatter['url'] = f'https://www.youtube.com/watch?v={metadata.get("id", "")}'
+    frontmatter['author'] = metadata.get('channel', '')
+
+    frontmatter_str = '---\n'
+    for key, value in frontmatter.items():
+        if key == 'tags':
+            frontmatter_str += f'{key}:\n'
+            for tag in value:
+                frontmatter_str += f'  - {tag}\n'
+        else:
+            frontmatter_str += f'{key}: {value}\n'
+    frontmatter_str += '---\n\n'
+
+    return frontmatter_str
+
 def extract_video_id(youtube_url):
-    '''Extracts the video ID from a YouTube URL.'''
-    pattern = r'(youtu\.be\/|youtube\.com\/(watch\?(.*&)?v=|(embed|v)\/))([^?&"\>]+)'
+    ''' Extracts the video ID from a YouTube URL. '''
+    pattern = r'(youtu\.be\/|youtube\.com\/(watch\?(.*&)?v=|(embed|v)\/))([^?&"\'>]+)'
     match = re.search(pattern, youtube_url)
     return match.group(5) if match else None
 
-def get_video_metadata(api_key, youtube_url):
-    '''Fetch metadata for a given YouTube video ID.'''
-
-    video_id = extract_video_id(youtube_url)
+def get_video_metadata(api_key, video_id):
+    ''' Fetch metadata for a given YouTube video ID. '''
     youtube = build('youtube', 'v3', developerKey=api_key)
 
     request = youtube.videos().list(
@@ -76,65 +97,51 @@ def get_video_metadata(api_key, youtube_url):
         return 'No video found for this ID.'
 
     snippet = response['items'][0]['snippet']
-    return {
-        'url': youtube_url,
+    metadata = {
+        'id': video_id,
         'title': snippet['title'],
         'description': snippet['description'],
         'channel': snippet['channelTitle'],
         'published': snippet.get('publishedAt'),
-        'tags': sanitize_tags(snippet.get('tags', [])),
+        'tags': snippet.get('tags', []),
     }
+    print(f"get_video_metadata - tags: {metadata['tags']}, type: {type(metadata['tags'])}")
+    return metadata
 
 def generate_embed_code(video_id, width, height):
     '''Generates the iframe embed code for a given video ID with specified width and height.'''
     return f'<iframe width="{width}" height="{height}" src="https://www.youtube.com/embed/{video_id}" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>'
 
-def create_markdown_file(metadata, embed_code, config, vault_path):
-    '''Creates a markdown file in the Obsidian vault for the given video metadata.'''
+def create_markdown_file(metadata, embed_code, vault_path, frontmatter_config):
+    ''' Creates a markdown file in the Obsidian vault for the given video metadata. '''
+    title = sanitize_filename(metadata['title'])
+    file_name = f"{title}.md"
     youtube_folder_path = os.path.join(os.path.expanduser(vault_path), 'youtube')
     os.makedirs(youtube_folder_path, exist_ok=True)
-
-    title = sanitize_filename(metadata['title'])
-    file_name = f'{title}.md'
     file_path = os.path.join(youtube_folder_path, file_name)
 
+    frontmatter_str = format_frontmatter(frontmatter_config, metadata)
+
     with open(file_path, 'w') as file:
-        file.write('---\n')
-        file.write(f'date: {datetime.now().strftime("%Y-%m-%d")}\n')
-        file.write(f'day: {datetime.now().strftime("%a")}\n')
-        file.write(f'time: {datetime.now().strftime("%H:%M")}\n')
-        tags = metadata.get('tags', [])
-        sanitized_tags = ['#' + tag for tag in sanitize_tags(tags)]
-        file.write(f'tags: [{", ".join(sanitized_tags)}]\n')
-        file.write(f'type: link\n')
-        file.write(f'url: {metadata.get("url", "")}\n')
-        file.write(f'author: {metadata.get("channel", "")}\n')
-        file.write('---\n\n')
-
-        file.write(f'# {metadata["title"]}\n\n')
-        file.write(f'{embed_code}\n\n')
-        file.write('## Description\n')
-        file.write(f'{metadata["description"]}\n\n')
-
-def epilog():
-    max_key_length = max(len(key) for key in RESOLUTIONS.keys()) + 1
-    return 'Available Resolutions:\n' + \
-           '\n'.join([f'{key.ljust(max_key_length)}: {value[0]}x{value[1]}' for key, value in RESOLUTIONS.items()])
+        file.write(frontmatter_str)
+        file.write(embed_code)
+        file.write('\n\n## Description\n')
+        file.write(metadata['description'])
 
 def main(args):
     if not TUBER_API_KEY:
         print('API key not found. Set the TUBER_API_KEY environment variable.', file=sys.stderr)
         sys.exit(1)
 
-    metadata = get_video_metadata(TUBER_API_KEY, args.youtube_url)
-    print(json.dumps(metadata, indent=4, sort_keys=True))
+    video_id = extract_video_id(args.youtube_url)
+    if not video_id:
+        print('Invalid YouTube URL.', file=sys.stderr)
+        return
 
-    width, height = RESOLUTIONS[args.resolution]
-    embed_code = generate_embed_code(video_id, width, height)
-    print('\nEmbed Code:')
-    print(embed_code)
+    metadata = get_video_metadata(TUBER_API_KEY, video_id)
+    frontmatter_config = args.frontmatter if 'frontmatter' in args else {}
+    create_markdown_file(metadata, generate_embed_code(video_id, *RESOLUTIONS[args.resolution]), args.vault, frontmatter_config)
 
-    create_markdown_file(metadata, embed_code, args.vault)
 
 if __name__ == '__main__':
     parser = ArgumentParser(
@@ -150,14 +157,7 @@ if __name__ == '__main__':
     ns, rem = parser.parse_known_args(sys.argv[1:])
     config_file = os.path.expanduser(ns.config)
 
-    config = {}
-    if os.path.exists(config_file):
-        with open(config_file, 'r') as file:
-            yaml_content = YAML(typ='safe').load(file)
-            if isinstance(yaml_content, dict):
-                config = {k.replace('-', '_'): v for k, v in yaml_content.items()}
-            else:
-                print(f'Warning: YAML config file {config_file} is not valid yaml.', file=sys.stderr)
+    config = load_config(config_file)
 
     parser = ArgumentParser(
         parents=[parser],
@@ -169,7 +169,7 @@ if __name__ == '__main__':
         help='YouTube video URL')
     parser.add_argument(
         '-r', '--resolution',
-        metavar='RES',
+        metavar='RESOLUTION',
         choices=RESOLUTIONS.keys(),
         help='Video resolution (default: %(default)s)')
     parser.add_argument(
