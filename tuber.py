@@ -36,7 +36,6 @@ def load_config(config_path):
 
 def sanitize_tags(tags):
     '''Sanitize tags for Obsidian: lowercase with hyphens instead of spaces or other characters.'''
-    print(f'sanitize_tags: {tags}')
     def sanitize_tag(tag):
         tag = tag.replace("'", '')          # Remove apostrophes
         tag = re.sub(r"[^\w\s]", '-', tag)  # Replace non-alphanumeric characters with hyphens
@@ -62,7 +61,7 @@ def format_frontmatter(frontmatter_config, metadata):
     frontmatter['day'] = datetime.now().strftime('%a')
     frontmatter['time'] = datetime.now().strftime('%H:%M')
     frontmatter['tags'] = sanitize_tags(metadata.get('tags', []))
-    frontmatter['url'] = f'https://www.youtube.com/watch?v={metadata.get("id", "")}'
+    frontmatter['url'] = f'https://www.youtube.com/watch?v={metadata.get("video_id", "")}'
     frontmatter['author'] = metadata.get('channel', '')
 
     frontmatter_str = '---\n'
@@ -98,14 +97,13 @@ def get_video_metadata(api_key, video_id):
 
     snippet = response['items'][0]['snippet']
     metadata = {
-        'id': video_id,
+        'video_id': video_id,
         'title': snippet['title'],
         'description': snippet['description'],
         'channel': snippet['channelTitle'],
         'published': snippet.get('publishedAt'),
         'tags': snippet.get('tags', []),
     }
-    print(f"get_video_metadata - tags: {metadata['tags']}, type: {type(metadata['tags'])}")
     return metadata
 
 def generate_embed_code(video_id, width, height):
@@ -142,7 +140,6 @@ def main(args):
     frontmatter_config = args.frontmatter if 'frontmatter' in args else {}
     create_markdown_file(metadata, generate_embed_code(video_id, *RESOLUTIONS[args.resolution]), args.vault, frontmatter_config)
 
-
 if __name__ == '__main__':
     parser = ArgumentParser(
         description='Fetch YouTube video metadata and generate embed code.',
@@ -169,13 +166,13 @@ if __name__ == '__main__':
         help='YouTube video URL')
     parser.add_argument(
         '-r', '--resolution',
-        metavar='RESOLUTION',
+        metavar='RES',
         choices=RESOLUTIONS.keys(),
-        help='Video resolution (default: %(default)s)')
+        help='default="%(default)s"; frontmatter config')
     parser.add_argument(
         '--vault',
         metavar='PATH',
-        help='Path to the Obsidian vault (default: %(default)s)')
+        help='default="%(default)s"; Obsidian vault path')
 
     args = parser.parse_args(rem)
     main(args)
