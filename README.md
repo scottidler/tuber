@@ -1,0 +1,2 @@
+# tuber
+youtube -> obsidian note
