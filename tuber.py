@@ -4,6 +4,8 @@ import os
 import re
 import sys
 import json
+import pyperclip
+
 from datetime import datetime
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from googleapiclient.discovery import build
@@ -131,6 +133,14 @@ def main(args):
         print('API key not found. Set the TUBER_API_KEY environment variable.', file=sys.stderr)
         sys.exit(1)
 
+    if args.youtube_url is None:
+        try:
+            clipboard_content = pyperclip.paste()
+            args.youtube_url = clipboard_content
+        except pyperclip.PyperclipException as e:
+            print(f"Error accessing clipboard: {e}", file=sys.stderr)
+            sys.exit(1)
+
     video_id = extract_video_id(args.youtube_url)
     if not video_id:
         print('Invalid YouTube URL.', file=sys.stderr)
@@ -161,8 +171,9 @@ if __name__ == '__main__':
         formatter_class=RawDescriptionHelpFormatter)
     parser.set_defaults(**config)
     parser.add_argument(
-        'youtube_url',
+        '-y', '--youtube_url',
         metavar='youtube-url',
+        nargs='?',
         help='YouTube video URL')
     parser.add_argument(
         '-r', '--resolution',

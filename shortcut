@@ -1,0 +1,2 @@
+bash -c 'export TUBER_API_KEY=$(cat ~/.config/youtube/tuber_api_key) && ~/repos/scottidler/tuber/tuber.py -y' > ~/tuber_log.txt 2>&1
+
